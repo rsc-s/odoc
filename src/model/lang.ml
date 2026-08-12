@@ -212,6 +212,11 @@ end =
 
 (** {3 Type Declarations} *)
 
+and Modalities : sig
+  type t = string list
+end =
+  Modalities
+
 and TypeDecl : sig
   module Field : sig
     type t = {
@@ -219,6 +224,7 @@ and TypeDecl : sig
       doc : Comment.docs;
       mutable_ : bool;
       type_ : TypeExpr.t;
+      modalities : Modalities.t;
     }
   end
 
@@ -232,7 +238,9 @@ and TypeDecl : sig
   end
 
   module Constructor : sig
-    type argument = Tuple of TypeExpr.t list | Record of Field.t list
+    type argument =
+      | Tuple of (TypeExpr.t * Modalities.t) list
+      | Record of Field.t list
 
     type t = {
       id : Identifier.Constructor.t;
@@ -323,12 +331,24 @@ end =
 and Value : sig
   type value = Abstract | External of string list
 
+  module Zero_alloc : sig
+    type t = {
+      opt : bool;
+      strict : bool;
+      arity : int;
+      custom_error_msg : string option;
+    }
+  end
+  type attr = Zero_alloc of Zero_alloc.t
+
   type t = {
     id : Identifier.Value.t;
     source_loc : Identifier.SourceLocation.t option;
     value : value;
     doc : Comment.docs;
     type_ : TypeExpr.t;
+    ext_attrs : attr list;
+    modalities : Modalities.t;
   }
 end =
   Value
@@ -426,7 +446,7 @@ and Kind : sig
     | Default
     | Abbreviation of Fragment.Type.t
     | Mod of t * string list
-    | With of t * TypeExpr.t * string list
+    | With of t * TypeExpr.t * Modalities.t
     | Kind_of of TypeExpr.t
     | Product of t list
 end =

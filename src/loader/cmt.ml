@@ -36,7 +36,7 @@ let cmt_builddir : string ref = ref ""
 let read_core_type env ctyp =
   Cmi.read_type_expr env ctyp.ctyp_type
 
-let rec read_pattern env parent doc pat =
+let rec read_pattern env parent doc id_attrs pat =
   let source_loc = None in
   let open Signature in
     match pat.pat_desc with
@@ -49,11 +49,12 @@ let rec read_pattern env parent doc pat =
     | Tpat_var(id, _, _uid) ->
 #endif
         let open Value in
+        let ext_attrs = id_attrs id in
         let id = Env.find_value_identifier env.ident_env id in
           Cmi.mark_type_expr pat.pat_type;
           let type_ = Cmi.read_type_expr env pat.pat_type in
           let value = Abstract in
-          [Value {id; source_loc; doc; type_; value}]
+          [Value {id; source_loc; doc; type_; value; ext_attrs; modalities = []}]
 #if OCAML_VERSION < (5,2, 0)
     | Tpat_alias(pat, id, _) ->
 #elif defined OXCAML
@@ -64,40 +65,42 @@ let rec read_pattern env parent doc pat =
     | Tpat_alias(pat, id,_,_,_) ->
 #endif
         let open Value in
+        let ext_attrs = id_attrs id in
         let id = Env.find_value_identifier env.ident_env id in
           Cmi.mark_type_expr pat.pat_type;
           let type_ = Cmi.read_type_expr env pat.pat_type in
           let value = Abstract in
-          Value {id; source_loc; doc; type_; value} :: read_pattern env parent doc pat
+          let item = Value {id; source_loc; doc; type_; value; ext_attrs; modalities = []} in
+          item :: read_pattern env parent doc id_attrs pat
     | Tpat_constant _ -> []
     | Tpat_tuple pats ->
 #if OCAML_VERSION >= (5, 4, 0) || defined OXCAML
       let pats = List.map snd pats (* remove labels *) in
 #endif
-      List.concat (List.map (read_pattern env parent doc) pats)
+      List.concat (List.map (read_pattern env parent doc id_attrs) pats)
 #if defined OXCAML
     | Tpat_unboxed_tuple pats ->
-        List.concat (List.map (fun (_, p, _) -> read_pattern env parent doc p) pats)
+        List.concat (List.map (fun (_, p, _) -> read_pattern env parent doc id_attrs p) pats)
 #endif
 #if OCAML_VERSION < (4, 13, 0)
     | Tpat_construct(_, _, pats) ->
 #else
     | Tpat_construct(_,_,pats,_) ->
 #endif
-        List.concat (List.map (read_pattern env parent doc) pats)
+        List.concat (List.map (read_pattern env parent doc id_attrs) pats)
     | Tpat_variant(_, None, _) -> []
     | Tpat_variant(_, Some pat, _) ->
-        read_pattern env parent doc pat
+        read_pattern env parent doc id_attrs pat
     | Tpat_record(pats, _) ->
         List.concat
           (List.map
-             (fun (_, _, pat) -> read_pattern env parent doc pat)
+             (fun (_, _, pat) -> read_pattern env parent doc id_attrs pat)
           pats)
 #if defined OXCAML
     | Tpat_record_unboxed_product(pats, _) ->
         List.concat
           (List.map
-             (fun (_, _, pat) -> read_pattern env parent doc pat)
+             (fun (_, _, pat) -> read_pattern env parent doc id_attrs pat)
           pats)
     | Tpat_array (_, _, pats) ->
 #elif OCAML_VERSION < (5, 4, 0)
@@ -105,12 +108,12 @@ let rec read_pattern env parent doc pat =
 #else
     | Tpat_array (_, pats) ->
 #endif
-        List.concat (List.map (read_pattern env parent doc) pats)
+        List.concat (List.map (read_pattern env parent doc id_attrs) pats)
     | Tpat_or(pat, _, _) ->
-        read_pattern env parent doc pat
+        read_pattern env parent doc id_attrs pat
     | Tpat_lazy pat ->
-        read_pattern env parent doc pat
-#if OCAML_VERSION >= (4,8,0) && OCAML_VERSION < (4,11,0)
+        read_pattern env parent doc id_attrs pat
+#if OCAML_VERSION < (4,11,0)
     | Tpat_exception pat ->
         read_pattern env parent doc pat
 #endif
@@ -119,13 +122,19 @@ let rec read_pattern env parent doc pat =
     | Tpat_unboxed_bool _ -> []
 #endif
 
-let read_value_binding env parent vb =
+let read_value_binding env parent id_attrs vb =
   let container = (parent : Identifier.Signature.t :> Identifier.LabelParent.t) in
   let doc = Doc_attr.attached_no_tag ~warnings_tag:env.warnings_tag container vb.vb_attributes in
-    read_pattern env parent doc vb.vb_pat
+    read_pattern env parent doc id_attrs vb.vb_pat
 
 let read_value_bindings env parent vbs =
   let container = (parent : Identifier.Signature.t :> Identifier.LabelParent.t) in
+  let id_attrs = Doc_attr.id_attrs_of_value_bindings vbs in
+  let lookup_attr_by_id id =
+    match Ident.find_same id id_attrs with
+    | attr -> attr
+    | exception Not_found -> []
+  in
   let items =
     List.fold_left
       (fun acc vb ->
@@ -133,7 +142,7 @@ let read_value_bindings env parent vbs =
         let comments =
           Doc_attr.standalone_multiple container ~warnings_tag:env.warnings_tag vb.vb_attributes in
          let comments = List.map (fun com -> Comment com) comments in
-         let vb = read_value_binding env parent vb in
+         let vb = read_value_binding env parent lookup_attr_by_id vb in
           List.rev_append vb (List.rev_append comments acc))
       [] vbs
   in
@@ -235,9 +244,7 @@ and read_class_signature env parent params cltyp =
         Signature {self; items; doc}
 
     | Tcty_arrow _ -> assert false
-#if OCAML_VERSION >= (4,6,0)
     | Tcty_open _ -> assert false
-#endif
 
 let rec read_class_type env parent params cty =
   let open Class in
@@ -249,11 +256,7 @@ let rec read_class_type env parent params cty =
       let arg = read_core_type env arg in
       let res = read_class_type env parent params res in
         Arrow(lbl, arg, res)
-#if OCAML_VERSION >= (4,8,0)
   | Tcty_open (_, cty) -> read_class_type env parent params cty
-#elif OCAML_VERSION >= (4,6,0)
-  | Tcty_open (_, _, _, _, cty) -> read_class_type env parent params cty
-#endif
 
 
 let rec read_class_field env parent cf =
@@ -334,11 +337,7 @@ and read_class_structure env parent params cl =
     | Tcl_constraint(cl, None, _, _, _) -> read_class_structure env parent params cl
     | Tcl_constraint(_, Some cltyp, _, _, _) ->
         read_class_signature env parent params cltyp
-#if OCAML_VERSION >= (4,8,0)
     | Tcl_open (_, cl) -> read_class_structure env parent params cl
-#elif OCAML_VERSION >= (4,6,0)
-    | Tcl_open (_, _, _, _, cl) -> read_class_structure env parent params cl
-#endif
 
 
 let rec read_class_expr env parent params cl =
@@ -359,11 +358,7 @@ let rec read_class_expr env parent params cl =
       read_class_expr env parent params cl
   | Tcl_constraint(_, Some cltyp, _, _, _) ->
       read_class_type env parent params cltyp
-#if OCAML_VERSION >= (4,8,0)
     | Tcl_open (_, cl) -> read_class_expr env parent params cl
-#elif OCAML_VERSION >= (4,6,0)
-    | Tcl_open (_, _, _, _, cl) -> read_class_expr env parent params cl
-#endif
 
 let read_class_declaration env parent cld =
   let open Class in
@@ -501,15 +496,9 @@ and read_module_binding env parent mb =
   in
   let canonical = match canonical with | None -> None | Some s -> Some (Doc_attr.conv_canonical_module s) in
   let hidden =
-#if OCAML_VERSION >= (4,10,0)
     match canonical, mid.iv with
     | None, (`Module (_, n) | `Parameter (_, n) | `Root (_, n)) -> Odoc_model.Names.ModuleName.is_hidden n
     | Some _, _ -> false
-#else
-    match canonical, mid.iv with
-    | None, (`Module (_, n) | `Parameter (_, n) | `Root (_, n)) -> Odoc_model.Names.ModuleName.is_hidden n
-    | Some _, _ -> false
-#endif
   in
   Some {id; source_loc; doc; type_; canonical; hidden; }
 
@@ -537,27 +526,18 @@ and read_structure_item env parent item =
         read_value_bindings env parent vbs
     | Tstr_primitive vd ->
         [Cmti.read_value_description env parent vd]
-#if OCAML_VERSION < (4,3,0)
-    | Tstr_type (decls) ->
-      let rec_flag = Ordinary in
-#else
     | Tstr_type (rec_flag, decls) ->
       let rec_flag =
         match rec_flag with
         | Recursive -> Ordinary
         | Nonrecursive -> Nonrec
       in
-#endif
       Cmti.read_type_declarations env parent rec_flag decls
     | Tstr_typext tyext ->
         [TypExt (read_type_extension env parent tyext)]
     | Tstr_exception ext ->
         let ext =
-#if OCAML_VERSION >= (4,8,0)
           Cmi.read_exception env parent ext.tyexn_constructor.ext_id ext.tyexn_constructor.ext_type
-#else
-          Cmi.read_exception env parent ext.ext_id ext.ext_type
-#endif
         in
           [Exception ext]
     | Tstr_module mb -> begin
@@ -575,14 +555,7 @@ and read_structure_item env parent item =
     | Tstr_include incl ->
         read_include env parent incl
     | Tstr_class cls ->
-        let cls = List.map
-#if OCAML_VERSION < (4,3,0)
-          (* NOTE(@ostera): remember the virtual flag was removed post 4.02 *)
-          (fun (cl, _, _) -> cl)
-#else
-          (fun (cl, _) -> cl)
-#endif
-          cls in
+        let cls = List.map (fun (cl, _) -> cl) cls in
           read_class_declarations env parent cls
     | Tstr_class_type cltyps ->
         let cltyps = List.map (fun (_, _, clty) -> clty) cltyps in
@@ -630,11 +603,7 @@ and read_include env parent incl =
 and read_open env parent o =
   let container = (parent : Identifier.Signature.t :> Identifier.LabelParent.t) in
   let doc = Doc_attr.attached_no_tag ~warnings_tag:env.warnings_tag container o.open_attributes in
-  #if OCAML_VERSION >= (4,8,0)
   let signature = o.open_bound_items in
-  #else
-  let signature = [] in
-  #endif
   let expansion, _ = Cmi.read_signature_noenv env parent (Odoc_model.Compat.signature signature) in
   Open.{expansion; doc}
 

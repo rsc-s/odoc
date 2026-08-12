@@ -31,9 +31,7 @@ val read_interface :
   Odoc_model.Compat.signature ->
   Paths.Identifier.RootModule.t * Odoc_model.Lang.Signature.t
 
-#if OCAML_VERSION < (4,3,0)
-val read_label : Asttypes.label -> Odoc_model.Lang.TypeExpr.label option
-#elif defined OXCAML
+#if defined OXCAML
 val read_label : Types.arg_label -> Odoc_model.Lang.TypeExpr.label option
 #else
 val read_label : Asttypes.arg_label -> Odoc_model.Lang.TypeExpr.label option
@@ -101,4 +99,21 @@ val read_exception : env ->
 val read_jkind_annotation :
   Parsetree.jkind_annotation option ->
   Odoc_model.Lang.Kind.t
+
+val read_modalities :
+  Types.mutability ->
+  Mode.Modality.Const.t ->
+  Odoc_model.Lang.Modalities.t
+
+val read_value_modalities :
+  Mode.Modality.t ->
+  Odoc_model.Lang.Modalities.t
 #endif
+
+val read_value_descr_modalities :
+  Types.value_description ->
+  Odoc_model.Lang.Modalities.t
+
+val read_label_modalities :
+  Types.label_declaration ->
+  Odoc_model.Lang.Modalities.t

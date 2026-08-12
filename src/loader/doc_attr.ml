@@ -35,9 +35,7 @@ let empty warnings_tag : Odoc_model.Comment.docs = empty_body warnings_tag
 
 let load_constant_string = function
   | {Parsetree.pexp_desc =
-#if OCAML_VERSION < (4,3,0)
-     Pexp_constant (Const_string (text, _))
-#elif OCAML_VERSION < (4,11,0)
+#if OCAML_VERSION < (4,11,0)
      Pexp_constant (Pconst_string (text, _))
 #elif OCAML_VERSION < (5,3,0)
      Pexp_constant (Pconst_string (text, _, _))
@@ -65,13 +63,41 @@ let load_alert_name_and_payload = function
       | _ -> None)
   | _ -> None
 
-#if OCAML_VERSION >= (4,8,0)
 let attribute_unpack = function
   | { Parsetree.attr_name = { Location.txt = name; _ }; attr_payload; attr_loc } ->
       (name, attr_payload, attr_loc)
+
+#if defined OXCAML
+(* the input is a [Zero_alloc.t] which is not present in OCaml, so it can't be
+   a no-op *)
+let lang_value_attr_of_zero_alloc zero_alloc =
+  match Zero_alloc.get zero_alloc with
+    | Default_zero_alloc -> None
+    | Ignore_assert_all -> None
+    | Assume { arity; _} ->
+        Some (Lang.Value.Zero_alloc ( Lang.Value.Zero_alloc.{ opt = false; strict = false; arity; custom_error_msg = None }))
+    | Check { strict; opt; arity; custom_error_msg } ->
+        Some (Lang.Value.Zero_alloc ( Lang.Value.Zero_alloc.{ opt; strict; arity; custom_error_msg }))
+#endif
+
+#if defined OXCAML
+let attrs_of_value_description (vd : Types.value_description) =
+  let zero_alloc = lang_value_attr_of_zero_alloc vd.val_zero_alloc in
+  match zero_alloc with
+  | Some za -> [za]
+  | None -> []
 #else
-let attribute_unpack = function
-  | { Location.txt = name; loc }, attr_payload -> (name, attr_payload, loc)
+let attrs_of_value_description (vd : Types.value_description) = []
+#endif
+
+#if defined OXCAML
+let id_attrs_of_value_bindings vbs =
+  vbs |> Typedtree.let_bound_idents_with_modes_sorts_and_checks |> List.fold_left (fun tbl (ident, _, zero_alloc) ->
+    match lang_value_attr_of_zero_alloc zero_alloc with
+    | None -> tbl
+    | Some attr -> Ident.add ident [attr] tbl) Ident.empty
+#else
+let id_attrs_of_value_bindings _vbs = Ident.empty
 #endif
 
 type payload = string * Location.t

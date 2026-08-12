@@ -304,6 +304,16 @@ module Make (Syntax : SYNTAX) = struct
       { Source_page.url; contents }
   end
 
+  module Modalities : sig
+    val format : Odoc_model.Lang.Modalities.t -> text
+  end = struct
+    let format = function
+      | [] -> O.noop
+      | mods ->
+          O.txt " " ++ O.txt "@@" ++ O.txt " "
+          ++ O.txt (String.concat ~sep:" " mods)
+  end
+
   module Type_expression : sig
     val type_expr : ?needs_parentheses:bool -> Lang.TypeExpr.t -> text
 
@@ -454,10 +464,7 @@ module Make (Syntax : SYNTAX) = struct
           let res =
             kind_annotation ~needs_parentheses:true base
             ++ O.txt " " ++ O.keyword "with" ++ O.txt " " ++ type_expr ty
-            ++
-            match modalities with
-            | [] -> O.noop
-            | mods -> O.txt " @@ " ++ O.txt (String.concat ~sep:" " mods)
+            ++ Modalities.format modalities
           in
           enclose_parens_if_needed res
       | Kind_of ty ->
@@ -607,21 +614,18 @@ module Make (Syntax : SYNTAX) = struct
     val format_constraints : (Lang.TypeExpr.t * Lang.TypeExpr.t) list -> text
   end = struct
     let record fields =
-      let field mutable_ id typ =
+      let field mutable_ id typ modalities =
         let url = Url.from_identifier ~stop_before:true id in
         let name = Paths.Identifier.name id in
         let attrs = [ "def"; "record"; Url.Anchor.string_of_kind url.kind ] in
         let cell =
-          (* O.td ~a:[ O.a_class ["def"; kind ] ]
-           *   [O.a ~a:[O.a_href ("#" ^ anchor); O.a_class ["anchor"]] []
-           *   ; *)
           O.code
             ((if mutable_ then O.keyword "mutable" ++ O.txt " " else O.noop)
             ++ O.txt name
             ++ O.txt Syntax.Type.annotation_separator
             ++ type_expr typ
+            ++ Modalities.format modalities
             ++ O.txt Syntax.Type.Record.field_separator)
-          (* ] *)
         in
         (url, attrs, cell)
       in
@@ -630,7 +634,9 @@ module Make (Syntax : SYNTAX) = struct
         |> List.map (fun fld ->
                let open Odoc_model.Lang.TypeDecl.Field in
                let url, attrs, code =
-                 field fld.mutable_ (fld.id :> Paths.Identifier.t) fld.type_
+                 field fld.mutable_
+                   (fld.id :> Paths.Identifier.t)
+                   fld.type_ fld.modalities
                in
                let anchor = Some url in
                let doc = fld.doc.elements in
@@ -708,7 +714,9 @@ module Make (Syntax : SYNTAX) = struct
       | Tuple lst ->
           let params =
             O.list lst ~sep:Syntax.Type.Tuple.element_separator
-              ~f:(type_expr ~needs_parentheses:is_gadt)
+              ~f:(fun (te, mods) ->
+                type_expr ~needs_parentheses:is_gadt te
+                ++ Modalities.format mods)
           in
           O.documentedSrc
             (cstr
@@ -1044,6 +1052,11 @@ module Make (Syntax : SYNTAX) = struct
   module Value : sig
     val value : Lang.Value.t -> Item.t
   end = struct
+    let rec arity_of_type_expr = function
+      | Lang.TypeExpr.Arrow (_lbl, _arg, curried) ->
+          1 + arity_of_type_expr curried
+      | _ -> 0
+
     let value (t : Odoc_model.Lang.Value.t) =
       let extra_attr, semicolon =
         match t.value with
@@ -1051,6 +1064,34 @@ module Make (Syntax : SYNTAX) = struct
         | External _ -> ([ "external" ], Syntax.Type.External.semicolon)
       in
       let name = Paths.Identifier.name t.id in
+      let zero_alloc =
+        match
+          List.find
+            (function Odoc_model.Lang.Value.Zero_alloc _ -> true)
+            t.ext_attrs
+        with
+        | exception Not_found -> O.noop
+        | Zero_alloc { opt; strict; arity; custom_error_msg } ->
+            let ext_arg =
+              match (opt, strict) with
+              | true, false -> " opt"
+              | false, true -> " strict"
+              | true, true -> " strict opt"
+              | false, false -> ""
+            in
+            let ext_arg =
+              match Int.equal (arity_of_type_expr t.type_) arity with
+              | true -> ext_arg
+              | false -> ext_arg ^ Printf.sprintf " arity %d" arity
+            in
+            let ext_arg =
+              match custom_error_msg with
+              | None -> ext_arg
+              | Some s -> ext_arg ^ Printf.sprintf "custom_error_message %S" s
+            in
+            let ext_attr = Printf.sprintf "[@@zero_alloc%s]" ext_arg in
+            O.cut ++ O.txt " " ++ O.txt ext_attr
+      in
       let content =
         O.documentedSrc
           (O.box_hv
@@ -1058,6 +1099,8 @@ module Make (Syntax : SYNTAX) = struct
              ++ O.txt " " ++ O.txt name
              ++ O.txt Syntax.Type.annotation_separator
              ++ O.cut ++ type_expr t.type_
+             ++ Modalities.format t.modalities
+             ++ zero_alloc
              ++ if semicolon then O.txt ";" else O.noop)
       in
       let attr = [ "value" ] @ extra_attr in

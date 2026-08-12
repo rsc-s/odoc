@@ -252,6 +252,7 @@ and TypeDecl : sig
       doc : CComment.docs;
       mutable_ : bool;
       type_ : TypeExpr.t;
+      modalities : Odoc_model.Lang.Modalities.t;
     }
   end
 
@@ -265,7 +266,9 @@ and TypeDecl : sig
   end
 
   module Constructor : sig
-    type argument = Tuple of TypeExpr.t list | Record of Field.t list
+    type argument =
+      | Tuple of (TypeExpr.t * Odoc_model.Lang.Modalities.t) list
+      | Record of Field.t list
 
     type t = {
       name : string;
@@ -313,6 +316,8 @@ and Value : sig
     doc : CComment.docs;
     type_ : TypeExpr.t;
     value : value;
+    ext_attrs : Odoc_model.Lang.Value.attr list;
+    modalities : Odoc_model.Lang.Modalities.t;
   }
 end =
   Value
@@ -1054,7 +1059,7 @@ module Fmt = struct
   and type_decl_constructor_arg c ppf =
     let open TypeDecl.Constructor in
     function
-    | Tuple ts -> type_constructor_params c ppf ts
+    | Tuple ts -> type_constructor_params c ppf (List.map fst ts)
     | Record fs -> type_decl_fields c ppf fs
 
   and type_decl_field c ppf t =
@@ -2266,7 +2271,8 @@ module Of_Lang = struct
     let open Odoc_model.Lang.TypeDecl.Constructor in
     match a with
     | Tuple ts ->
-        TypeDecl.Constructor.Tuple (List.map (type_expression ident_map) ts)
+        TypeDecl.Constructor.Tuple
+          (List.map (fun (te, mods) -> (type_expression ident_map te, mods)) ts)
     | Record fs -> Record (List.map (type_decl_field ident_map) fs)
 
   and type_decl_field ident_map f =
@@ -2277,6 +2283,7 @@ module Of_Lang = struct
       doc = docs ident_map f.doc;
       mutable_ = f.mutable_;
       type_;
+      modalities = f.modalities;
     }
 
   and type_decl_unboxed_field ident_map f =
@@ -2621,6 +2628,8 @@ module Of_Lang = struct
       doc = docs ident_map v.doc;
       value = v.value;
       source_loc = v.source_loc;
+      ext_attrs = v.ext_attrs;
+      modalities = v.modalities;
     }
 
   and include_ ident_map i =

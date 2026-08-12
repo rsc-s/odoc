@@ -49,11 +49,10 @@ depends: [
   "tyxml" {>= "4.4.0"}
   "fmt"
   "crunch" {>= "1.4.1"}
-  "ocamlfind" {with-test}
+  "ocamlfind" {>= "1.9.8" & with-test}
   "yojson" {>= "2.1.0" & with-test}
   "sexplib0" {with-test}
   "conf-jq" {with-test}
-  "ppx_expect" {with-test}
   "bos" {with-test}
 ]
 

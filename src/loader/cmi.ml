@@ -100,16 +100,7 @@ let opt_iter f = function
 
 let read_label lbl =
   let open TypeExpr in
-#if OCAML_VERSION < (4,3,0)
-  (* NOTE(@ostera): 4.02 does not have an Asttypes variant for whether the
-   * label exists, and is an optional label or not, so I went back to string
-   * manipulation *)
-  if String.length lbl == 0
-  then None
-  else match String.get lbl 0 with
-      | '?' -> Some (Optional (String.sub lbl 1 (String.length lbl - 1)))
-      | _ -> Some (Label lbl)
-#elif defined OXCAML
+#if defined OXCAML
   match lbl with
   | Types.Nolabel -> None
   | Types.Labelled s -> Some (Label s)
@@ -396,9 +387,6 @@ let prepare_type_parameters params manifest =
 
 (* NOTE(@ostera): constructor with inlined records were introduced post 4.02 *)
 let mark_constructor_args =
-#if OCAML_VERSION < (4,3,0)
-  List.iter mark_type
-#else
   function
 #if defined OXCAML
    | Cstr_tuple args -> List.iter (fun carg -> mark_type carg.ca_type) args
@@ -406,7 +394,6 @@ let mark_constructor_args =
    | Cstr_tuple args -> List.iter mark_type args
 #endif
    | Cstr_record lds -> List.iter (fun ld -> mark_type ld.ld_type) lds
-#endif
 
 let mark_type_kind = function
 #if OCAML_VERSION >= (5,2,0)
@@ -539,9 +526,34 @@ let jkind_of_type_desc te =
   | Tvar { jkind; _ } | Tunivar { jkind; _ } ->
       read_jkind_annotation jkind.annotation
   | _ -> Kind.Default
+
+let read_modalities mut modalities =
+  Typemode.least_modalities ~include_implied:false ~mut modalities
+  |> Typemode.sort_dedup_modalities
+  |> List.map (fun (Mode.Modality.Atom (ax, m)) ->
+    Format_doc.asprintf "%a" (Mode.Modality.Per_axis.print ax) m)
+
+let read_value_modalities modalities =
+  let const =
+    Ctype.zap_modalities_to_floor_if_modes_enabled_at Alpha modalities
+  in
+  read_modalities Immutable const
+
+let read_value_descr_modalities vd =
+  read_value_modalities vd.val_modalities
+
+let read_label_modalities ld =
+  read_modalities ld.ld_mutable ld.ld_modalities
+
+let read_constructor_argument arg =
+  arg.ca_type, read_modalities Immutable arg.ca_modalities
+
 #else
 
 let jkind_of_type_desc _te = Kind.Default
+let read_value_descr_modalities _vd = []
+let read_label_modalities _ld = []
+let read_constructor_argument arg = arg, []
 
 #endif
 
@@ -808,7 +820,9 @@ let read_value_description ({ident_env ; warnings_tag} as env) parent id vd =
         External primitives
     | _ -> assert false
   in
-  Value { Value.id; source_loc; doc; type_; value }
+  let ext_attrs = Doc_attr.attrs_of_value_description vd in
+  let modalities = read_value_descr_modalities vd in
+  Value { Value.id; source_loc; doc; type_; value; ext_attrs; modalities }
 
 #if defined OXCAML
 let is_mutable = Types.is_mutable
@@ -826,25 +840,23 @@ let read_label_declaration env parent ld =
   in
   let mutable_ = is_mutable ld.ld_mutable in
   let type_ = read_type_expr env ld.ld_type in
-    {id; doc; mutable_; type_}
+  let modalities = read_label_modalities ld in
+  {id; doc; mutable_; type_; modalities}
 
 let read_constructor_declaration_arguments env parent arg =
-#if OCAML_VERSION < (4,3,0)
-  (* NOTE(@ostera): constructor with inlined records were introduced post 4.02
-     so it's safe to use Tuple here *)
-  ignore parent;
-  TypeDecl.Constructor.Tuple(List.map (read_type_expr env) arg)
-#else
   let open TypeDecl.Constructor in
     match arg with
-#if defined OXCAML
-    | Cstr_tuple args -> Tuple (List.map (fun arg -> read_type_expr env arg.ca_type) args)
-#else
-    | Cstr_tuple args -> Tuple (List.map (read_type_expr env) args)
-#endif
+    | Cstr_tuple args ->
+        let args_with_modalities =
+          List.map
+            (fun arg ->
+              let arg_type, arg_modalities = read_constructor_argument arg in
+              read_type_expr env arg_type, arg_modalities)
+            args
+        in
+        Tuple args_with_modalities
     | Cstr_record lds ->
         Record (List.map (read_label_declaration env parent) lds)
-#endif
 
 let read_constructor_declaration env parent cd =
   let open TypeDecl.Constructor in

@@ -58,21 +58,7 @@ let rec read_core_type env container ctyp =
     | Ttyp_arrow(lbl, arg, res) ->
 #endif
         let lbl = read_label lbl in
-#if OCAML_VERSION < (4,3,0)
-        (* NOTE(@ostera): Unbox the optional value for this optional labelled
-           argument since the 4.02.x representation includes it explicitly. *)
-        let arg = match lbl with
-          | None | Some(Label(_)) -> read_core_type env container arg
-          | Some(Optional(_)) | Some(RawOptional(_)) ->
-              let arg' = match arg.ctyp_desc with
-                | Ttyp_constr(_, _, param :: _) -> param
-                | _ -> arg
-              in
-              read_core_type env container arg'
-#else
-        let arg = read_core_type env container arg
-#endif
-        in
+        let arg = read_core_type env container arg in
         let res = read_core_type env container res in
           Arrow(lbl, arg, res)
     | Ttyp_tuple typs ->
@@ -95,18 +81,6 @@ let rec read_core_type env container ctyp =
         let open TypeExpr.Object in
         let fields =
           List.map
-#if OCAML_VERSION < (4,6,0)
-            (fun (name, _, typ) ->
-              Method {name; type_ = read_core_type env container typ})
-#elif OCAML_VERSION < (4,8,0)
-            (function
-              | OTtag (name, _, typ) ->
-                Method {
-                  name = name.txt;
-                  type_ = read_core_type env container typ;
-                }
-              | OTinherit typ -> Inherit (read_core_type env container typ))
-#else
             (function
               | {of_desc=OTtag (name, typ); _} ->
                 Method {
@@ -114,7 +88,6 @@ let rec read_core_type env container ctyp =
                   type_ = read_core_type env container typ;
                 }
               | {of_desc=OTinherit typ; _} -> Inherit (read_core_type env container typ))
-#endif
             methods
         in
           Object {fields; open_ = (closed = Asttypes.Open)}
@@ -144,19 +117,11 @@ let rec read_core_type env container ctyp =
         let open TypeExpr.Polymorphic_variant in
         let elements =
           fields |> List.map begin fun field ->
-#if OCAML_VERSION >= (4,8,0)
             match field.rf_desc with
               | Ttag(name, constant, arguments) ->
                 let attributes = field.rf_attributes in
-#else
-            match field with
-              | Ttag(name, attributes, constant, arguments) ->
-#endif
-                let arguments =
-                  List.map (read_core_type env container) arguments in
-#if OCAML_VERSION >= (4,6,0)
-                  let name = name.txt in
-#endif
+                let arguments = List.map (read_core_type env container) arguments in
+                let name = name.txt in
                 let doc = Doc_attr.attached_no_tag ~warnings_tag:env.warnings_tag container attributes in
                 Constructor {name; constant; arguments; doc}
               | Tinherit typ -> Type (read_core_type env container typ)
@@ -239,7 +204,9 @@ let read_value_description env parent vd =
     | [] -> Value.Abstract
     | primitives -> External primitives
   in
-  Value { Value.id; source_loc; doc; type_; value }
+  let ext_attrs = Doc_attr.attrs_of_value_description vd.val_val in
+  let modalities = Cmi.read_value_descr_modalities vd.val_val in
+  Value { Value.id; source_loc; doc; type_; value; ext_attrs; modalities }
 
 let read_type_parameter (ctyp, var_and_injectivity)  =
   let open TypeDecl in
@@ -280,9 +247,21 @@ let read_type_parameter (ctyp, var_and_injectivity)  =
     {desc; variance; injectivity; kind}
 
 #if defined OXCAML
+
 let is_mutable = Types.is_mutable
+
+let read_typedtree_label_modalities ld =
+  Cmi.read_modalities ld.ld_mutable ld.ld_modalities.moda_modalities
+
+let read_constructor_argument arg =
+  arg.ca_type, Cmi.read_modalities Immutable arg.ca_modalities.moda_modalities
+
 #else
+
 let is_mutable ld = ld = Mutable
+let read_typedtree_label_modalities _ld = []
+let read_constructor_argument arg = arg, []
+
 #endif
 
 let read_label_declaration env parent label_parent ld =
@@ -293,7 +272,8 @@ let read_label_declaration env parent label_parent ld =
   let doc = Doc_attr.attached_no_tag ~warnings_tag:env.warnings_tag label_parent ld.ld_attributes in
   let mutable_ = is_mutable ld.ld_mutable in
   let type_ = read_core_type env label_parent ld.ld_type in
-    {id; doc; mutable_; type_}
+  let modalities = read_typedtree_label_modalities ld in
+  {id; doc; mutable_; type_; modalities}
 
 let read_unboxed_label_declaration env parent label_parent ld =
   let open TypeDecl.UnboxedField in
@@ -307,20 +287,18 @@ let read_unboxed_label_declaration env parent label_parent ld =
 
 let read_constructor_declaration_arguments env parent label_parent arg =
   let open TypeDecl.Constructor in
-#if OCAML_VERSION < (4,3,0)
-  ignore parent;
-  Tuple (List.map (read_core_type env label_parent) arg)
-#else
   match arg with
   | Cstr_tuple args ->
-#if defined OXCAML
-      Tuple (List.map (fun arg -> read_core_type env label_parent arg.ca_type) args)
-#else
-      Tuple (List.map (fun arg -> read_core_type env label_parent arg) args)
-#endif
+      let args =
+        List.map
+          (fun arg ->
+            let arg_type, arg_modalities = read_constructor_argument arg in
+            read_core_type env label_parent arg_type, arg_modalities)
+          args
+      in
+      Tuple args
   | Cstr_record lds ->
       Record (List.map (read_label_declaration env parent label_parent) lds)
-#endif
 
 let read_constructor_declaration env parent cd =
   let open TypeDecl.Constructor in
@@ -416,10 +394,8 @@ let read_type_declarations env parent rec_flag decls =
   in
     List.rev items
 
-#if OCAML_VERSION >= (4,8,0)
 let read_type_substitutions env parent decls =
   List.map (fun decl -> Odoc_model.Lang.Signature.TypeSubstitution (read_type_declaration env parent decl)) decls
-#endif
 
 let read_extension_constructor env parent ext =
   let open Extension.Constructor in
@@ -543,11 +519,7 @@ and read_class_signature env parent label_parent cltyp =
         in
         Signature {self; items; doc}
     | Tcty_arrow _ -> assert false
-#if OCAML_VERSION >= (4,8,0)
   | Tcty_open (_, cty) -> read_class_signature env parent label_parent cty
-#elif OCAML_VERSION >= (4,6,0)
-  | Tcty_open (_, _, _, _, cty) -> read_class_signature env parent label_parent cty
-#endif
 
 let read_class_type_declaration env parent cltd =
   let open ClassType in
@@ -582,11 +554,7 @@ let rec read_class_type env parent label_parent cty =
     let arg = read_core_type env label_parent arg in
     let res = read_class_type env parent label_parent res in
         Arrow(lbl, arg, res)
-#if OCAML_VERSION >= (4,8,0)
   | Tcty_open (_, cty) -> read_class_type env parent label_parent cty
-#elif OCAML_VERSION >= (4,6,0)
-  | Tcty_open (_, _, _, _, cty) -> read_class_type env parent label_parent cty
-#endif
 
 let read_class_description env parent cld =
   let open Class in
@@ -645,7 +613,17 @@ let rec read_with_constraint env global_parent parent (_, frag, constr) =
 and read_module_type env parent label_parent mty =
   let open ModuleType in
     match mty.mty_desc with
-    | Tmty_ident(p, _) -> Path { p_path = Env.Path.read_module_type env.ident_env p; p_expansion = None }
+    | Tmty_ident(p, _) ->
+        (match mty.mty_type with
+#if defined OXCAML
+         | Mty_signature sg ->
+             (* For modules with modalities (e.g. [module M : S @@ portable]),
+                the mty_desc stores only [Tmty_ident S] so we use the mty_type
+                for the expanded signature with modalities applied to each value. *)
+             let mty_type = Odoc_model.Compat.module_type mty.mty_type in
+             Cmi.read_module_type env parent mty_type
+#endif
+         | _ -> Path { p_path = Env.Path.read_module_type env.ident_env p; p_expansion = None })
     | Tmty_signature sg ->
         let sg, () = read_signature Odoc_model.Semantics.Expect_none env parent sg in
         Signature sg
@@ -826,26 +804,17 @@ and read_signature_item env parent item =
     match item.sig_desc with
     | Tsig_value vd ->
         [read_value_description env parent vd]
-#if OCAML_VERSION < (4,3,0)
-    | Tsig_type decls ->
-      let rec_flag = Ordinary in
-#else
     | Tsig_type (rec_flag, decls) ->
       let rec_flag =
         match rec_flag with
         | Recursive -> Ordinary
         | Nonrecursive -> Nonrec
       in
-#endif
       read_type_declarations env parent rec_flag decls
     | Tsig_typext tyext ->
         [TypExt (read_type_extension env parent tyext)]
     | Tsig_exception ext ->
-#if OCAML_VERSION >= (4,8,0)
         [Exception (read_exception env parent ext.tyexn_constructor)]
-#else
-        [Exception (read_exception env parent ext)]
-#endif
     | Tsig_module md -> begin
         match read_module_declaration env parent md with
         | Some m -> [Module (Ordinary, m)]
@@ -875,7 +844,6 @@ and read_signature_item env parent item =
           | None -> []
           | Some doc -> [Comment doc]
       end
-#if OCAML_VERSION >= (4,8,0)
     | Tsig_typesubst tst ->
         read_type_substitutions env parent tst
     | Tsig_modsubst mst ->
@@ -911,7 +879,6 @@ and read_module_type_substitution env parent mtd =
 #endif
 
 
-#endif
 
 and read_include env parent incl =
   let open Include in
@@ -944,11 +911,7 @@ and read_include env parent incl =
 and read_open env parent o =
   let container = (parent : Identifier.Signature.t :> Identifier.LabelParent.t) in
   let doc = Doc_attr.attached_no_tag container ~warnings_tag:env.warnings_tag o.open_attributes in
-  #if OCAML_VERSION >= (4,8,0)
   let signature = o.open_bound_items in
-  #else
-  let signature = [] in
-  #endif
   let expansion, _ = Cmi.read_signature_noenv env parent (Odoc_model.Compat.signature signature) in
   { expansion; doc }
 

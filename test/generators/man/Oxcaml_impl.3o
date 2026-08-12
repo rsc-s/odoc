@@ -11,4 +11,8 @@ Oxcaml_impl
 .SH Documentation
 .sp 
 .nf 
-\f[CB]val\fR add : bool \f[CB]\->\fR int \f[CB]\->\fR int \f[CB]\->\fR int
+\f[CB]val\fR add : bool \f[CB]\->\fR int \f[CB]\->\fR int \f[CB]\->\fR int [@@zero_alloc]
+.sp 
+\f[CB]module\fR To_be_included : \f[CB]sig\fR \.\.\. \f[CB]end\fR
+.sp 
+\f[CB]module\fR Including : \f[CB]sig\fR \.\.\. \f[CB]end\fR

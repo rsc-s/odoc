@@ -1,0 +1,25 @@
+
+.TH M3 3 "" "Odoc" "OCaml Library"
+.SH Name
+Oxcaml\.M3
+.SH Synopsis
+.sp 
+.in 2
+\fBModule Oxcaml\.M3\fR
+.in 
+.sp 
+.fi 
+contended modality applied to all definitions in the module, except the ones which have already specified this axis\.
+.nf 
+.SH Documentation
+.sp 
+.nf 
+\f[CB]type\fR s
+.sp 
+\f[CB]val\fR f : string \f[CB]\->\fR bool @@ contended
+.sp 
+\f[CB]val\fR portable : string \f[CB]\->\fR string array @@ portable contended
+.sp 
+\f[CB]val\fR nonportable : string \f[CB]\->\fR string array @@ contended
+.sp 
+\f[CB]val\fR uncontended : string \f[CB]\->\fR bytes
