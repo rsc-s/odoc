@@ -121,7 +121,7 @@ let compile ?partial ~partial_dir (all : Odoc_unit.any list) =
           (fun (other_unit_name, other_unit_hash) ->
             match compile_other other_unit_hash with
             | Ok r -> Some r
-            | Error _exn ->
+            | Error exn ->
                 Logs.debug (fun m ->
                     m
                       "Error during compilation of module %s (hash %s, \
