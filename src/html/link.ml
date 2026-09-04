@@ -36,7 +36,7 @@ module Path = struct
     let l = Url.Path.to_list url in
     let is_dir =
       if Config.flat config then function `Page -> `Always | _ -> `Never
-      else function `LeafPage | `File | `SourcePage -> `Never | _ -> `Always
+      else function `LeafPage | `File -> `Never | _ -> `Always
     in
     let dir, file = Url.Path.split ~is_dir l in
     let dir = List.map segment_to_string dir in
@@ -45,9 +45,7 @@ module Path = struct
       | [] -> "index.html"
       | [ (`LeafPage, name) ] -> name ^ ".html"
       | [ (`File, name) ] -> name
-      | [ (`SourcePage, name) ] -> name ^ ".html"
       | xs ->
-          assert (Config.flat config);
           String.concat "-" (List.map segment_to_string xs) ^ ".html"
     in
     (dir, file)
