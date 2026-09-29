@@ -313,6 +313,7 @@ let html_generate ~occurrence_file ~remaps ~generate_json
                 let search_uris = [ db_path; Sherlodoc.js_file ] in
                 (Some search_uris, sidebar)
           in
+                Logs.err (fun m -> m "aaa %s" (Fpath.to_string src_path));
           Odoc.html_generate_source ?search_uris ?sidebar ~output_dir
             ~input_file ~home_breadcrumb ~source:src_path ();
           Atomic.incr Stats.stats.generated_units;
