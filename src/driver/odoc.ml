@@ -286,7 +286,7 @@ let html_generate_source ~output_dir ?(ignore_output = false) ~source ?sidebar
   in
   let cmd =
     !odoc % "html-generate-source" %% file %% sidebar % p source %% search_uris
-    % "-o" % (output_dir ^ "a") %% home_breadcrumb
+    % "-o" % output_dir %% home_breadcrumb
   in
   let cmd = if as_json then cmd % "--as-json" else cmd in
 

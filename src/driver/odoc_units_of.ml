@@ -172,7 +172,6 @@ let packages ~dirs ~extra_paths ~remap ~indices_style (pkgs : Packages.t list) :
     | Some { src_path } ->
         let rel_dir = lib_dir pkg lib in
         let kind =
-          let src_name = String.map (fun c -> if c = '.' then '-' else c) (Fpath.filename src_path) ^ "boop.ml" in
           let src_name = Fpath.filename src_path in
           let src_id =
             Fpath.(src_lib_dir pkg lib / src_name) |> Odoc.Id.of_fpath

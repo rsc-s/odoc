@@ -104,7 +104,7 @@ let deps pkgs =
       % "never" % "-s" % "--or")
   in
   let cmd =
-    List.fold_left (fun cmd pkg -> Cmd.(cmd % pkg)) cmd pkgs
+    List.fold_left (fun cmd pkg -> Cmd.(cmd % "--required-by" % pkg)) cmd pkgs
   in
   let out = Util.lines_of_process cmd in
   List.filter_map
