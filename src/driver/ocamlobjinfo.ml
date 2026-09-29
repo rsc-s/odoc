@@ -22,32 +22,34 @@ let source_possibilities file =
 
 let source_possibilities file =
   let file = Fpath.(v file) in
-  let ext = Fpath.get_ext file
-  and filename = Fpath.(filename (rem_ext file)) in
-  let include_subdirs_possibilities = match Astring.String.cut ~sep:"__" filename with
-  (* filename has `__`. this is probably a dune-generated file, whose path is fully described by the filename. *)
-  | Some (lib_name, rest) ->
-      let parts =
-        Astring.String.cuts ~empty:true ~sep:"__" rest |> List.map String.uncapitalize_ascii
-      in
-      let join = Astring.String.concat ~sep:"/" in
-      source_possibilities (join parts ^ ext)
-      @ source_possibilities
-        (join (parts @ [ List.nth parts (List.length parts - 1) ^ ext ]))
-  | None -> []
-         in
-      (* this is probably an original source file, whose path may be copied into a different subtree. *)
-      let segs = Fpath.segs file in
-      let rec tails = function
-        | [] -> [ [] ]
-        | _ :: rest as xs -> xs :: tails rest
-      in
-      let possibilities =
-        tails segs
-        |> List.map (String.concat Fpath.dir_sep)
-        |> List.filter (fun x -> String.length x <> 0)
-      in
-      include_subdirs_possibilities @ List.concat_map source_possibilities possibilities
+  let ext = Fpath.get_ext file and filename = Fpath.(filename (rem_ext file)) in
+  let include_subdirs_possibilities =
+    match Astring.String.cut ~sep:"__" filename with
+    (* filename has `__`. this is probably a dune-generated file, whose path is fully described by the filename. *)
+    | Some (lib_name, rest) ->
+        let parts =
+          Astring.String.cuts ~empty:true ~sep:"__" rest
+          |> List.map String.uncapitalize_ascii
+        in
+        let join = Astring.String.concat ~sep:"/" in
+        source_possibilities (join parts ^ ext)
+        @ source_possibilities
+            (join (parts @ [ List.nth parts (List.length parts - 1) ^ ext ]))
+    | None -> []
+  in
+  (* this is probably an original source file, whose path may be copied into a different subtree. *)
+  let segs = Fpath.segs file in
+  let rec tails = function
+    | [] -> [ [] ]
+    | _ :: rest as xs -> xs :: tails rest
+  in
+  let possibilities =
+    tails segs
+    |> List.map (String.concat Fpath.dir_sep)
+    |> List.filter (fun x -> String.length x <> 0)
+  in
+  include_subdirs_possibilities
+  @ List.concat_map source_possibilities possibilities
 
 let get_source file srcdirs =
   let cmd = Cmd.(ocamlobjinfo % p file) in
